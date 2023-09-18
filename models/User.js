@@ -2,12 +2,13 @@ const { getDB } = require('../config/db');
 const bcrypt = require('bcrypt');
 
 class User {
-  constructor({ email, password, walletAddress, encryptedPrivateKey,otpHash }) {
+  constructor({ email, password, walletAddress, encryptedPrivateKey, otpHash, USER_TYPE }) {
     this.email = email;
     this.password = password;
     this.walletAddress = walletAddress;
     this.encryptedPrivateKey = encryptedPrivateKey;
-    this.otpHash=otpHash;
+    this.otpHash = otpHash;
+    this.USER_TYPE = USER_TYPE; // Add USER_TYPE to the constructor
   }
 
   async save() {
@@ -35,5 +36,6 @@ class User {
     return userCollection.findOne({ email });
   }
 }
+
 
 module.exports = User;

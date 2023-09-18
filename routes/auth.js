@@ -12,7 +12,9 @@ router.post('/register', authController.register);
 router.post('/sendotp',  authController.sendOTP);
 
 // Login route
-router.post('/login', authController.login);
+router.post('/alumni/login', authController.alumniLogin);
+router.post('/university/login', authController.universityLogin);
+router.post('/systemAdmin/login', authController.systemAdminLogin);
 
 // Route to get user wallet and balance with JWT middleware applied
 router.get('/getUserWalletAndBalance', jwtMiddleware, authController.getUserWalletAndBalance);
