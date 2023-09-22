@@ -11,16 +11,12 @@ const { generateOTP, verifyOTP } = require("../utils/otp");
 const bcrypt = require("bcrypt");
 
 const authenticationController = {
-  // Register a new user
   register: async (req, res) => {
     try {
-      const { email, password, userType } = req.body;
+      const { email, password, phoneNumber, category } = req.body;
 
       // Check if the email is already registered
       const existingUser = await User.findByEmail(email);
-      // if (userType=="alumni" && !existingUser ) {
-      //   return res.status(400).json({ error: "Alumni isn't added to list yet." });
-      // }
 
       if (existingUser) {
         return res.status(400).json({ error: "User Already Exists." });
@@ -32,24 +28,14 @@ const authenticationController = {
       // Encrypt the private key before saving it
       const encryptedPrivateKey = encrypt(wallet.privateKey, password);
 
-      // Generate and send OTP (You can use your preferred method to send OTP)
-      const otp = "123456"; // Implement a function to generate OTP
-      // Send the OTP to the user's email or via another preferred method
-
-      // Store the OTP hash in the user document (for verification during login)
-      const otpHash = bcrypt.hashSync(otp, 10);
-
-      // Hash the user's password before storing it in the database
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      // Create a new user with the email, hashed password, wallet details, and OTP hash
+      // Create a new user with the email, hashed password, wallet details, and user type
       const user = new User({
         email,
-        password: hashedPassword,
+        password: password,
         walletAddress: wallet.address,
         encryptedPrivateKey,
-        otpHash,
-        USER_TYPE:userType
+        phoneNumber,
+        category, 
       });
 
       await user.save();
@@ -60,94 +46,75 @@ const authenticationController = {
     }
   },
 
-  // Send OTP to the user's email
-  sendOTP: async (req, res) => {
-    try {
-      const { email } = req.body;
-
-      const user = await User.findByEmail(email);
-      if (!user) {
-        return res.status(404).json({ error: "User not found" });
-      }
-
-      // Generate and send OTP (You can use your preferred method to send OTP)
-      const otp = generateOTP(); // Implement a function to generate OTP
-      // Send the OTP to the user's email or via another preferred method
-      console.log(otp);
-
-      // Store the OTP hash in the user document (for verification during login)
-      user.otpHash = bcrypt.hashSync(otp, 10);
-      await user.save();
-
-      res.json({ message: `OTP sent successfully: ${otp}` });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Failed to send OTP" });
-    }
-  },
-
-  // Login with email and OTP
-  // Login with email and OTP, and return a JWT
+  // Login with email and password, and return a JWT
   alumniLogin: async (req, res) => {
     try {
-      const { email, otp } = req.body;
+      const { email, password } = req.body;
 
       const user = await User.findByEmail(email);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      // Verify OTP
-      const isOTPValid = verifyOTP(otp, user.otpHash);
-      if (!isOTPValid) {
-        return res.status(401).json({ error: "Invalid OTP" });
+      // Verify the password
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        return res.status(401).json({ error: "Invalid password" });
       }
 
-      // Check if USER_TYPE is "alumni"
-      if (user.USER_TYPE !== "alumni") {
-        return res.status(403).json({ error: "Do not have enough Permission " });
+      // Check if category is "student" or "alumni"
+      if (user.category !== "student" && user.category !== "alumni") { // Use && instead of ||
+        return res
+          .status(403)
+          .json({ error: "Do not have enough Permission " });
       }
+      const balance = await getWalletBalance(user.walletAddress);
 
-      // Alumni is valid, generate JWT token for authentication
+      // Generate JWT token for authentication
       const token = jwt.sign(
         {
           sub: user._id,
           email: user.email,
           walletAddress: user.walletAddress,
-          USER_TYPE: user.USER_TYPE,
+          category: user.category,
+          walletBalance:balance
         },
         process.env.SECRET_KEY,
         { expiresIn: "10h" }
       );
 
       // Send the JWT token in the response
-      res.json({ message: "Alumni login successful", token });
+      res.json({ message: "Login successful", token });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: "Alumni login failed" });
+      res.status(500).json({ error: "Login failed" });
     }
   },
 
   // University Login
   universityLogin: async (req, res) => {
     try {
-      const { email, otp } = req.body;
+      const { email, password } = req.body;
 
       const user = await User.findByEmail(email);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      // Verify OTP
-      const isOTPValid = verifyOTP(otp, user.otpHash);
-      if (!isOTPValid) {
-        return res.status(401).json({ error: "Invalid OTP" });
+      // Verify the password
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        return res.status(401).json({ error: "Invalid password" });
       }
 
-      // Check if USER_TYPE is "university"
-      if (user.USER_TYPE !== "university") {
-        return res.status(403).json({ error: "Do not have enough Permission " });
+      // Check if category is "university"
+      if (user.category !== "admin") {
+        return res
+          .status(403)
+          .json({ error: "Do not have enough Permission " });
       }
+
+      const balance = await getWalletBalance(user.walletAddress);
 
       // University login is valid, generate JWT token for authentication
       const token = jwt.sign(
@@ -155,7 +122,8 @@ const authenticationController = {
           sub: user._id,
           email: user.email,
           walletAddress: user.walletAddress,
-          USER_TYPE: user.USER_TYPE,
+          category: user.category,
+          walletBalance:balance
         },
         process.env.SECRET_KEY,
         { expiresIn: "10h" }
@@ -172,23 +140,27 @@ const authenticationController = {
   // System Admin Login
   systemAdminLogin: async (req, res) => {
     try {
-      const { email, otp } = req.body;
+      const { email, password } = req.body;
 
       const user = await User.findByEmail(email);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      // Verify OTP
-      const isOTPValid = verifyOTP(otp, user.otpHash);
-      if (!isOTPValid) {
-        return res.status(401).json({ error: "Invalid OTP" });
+      // Verify the password
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        return res.status(401).json({ error: "Invalid password" });
       }
 
-      // Check if USER_TYPE is "systemadmin"
-      if (user.USER_TYPE !== "systemadmin") {
-        return res.status(403).json({ error: "Do not have enough Permission " });
+      // Check if category is "systemadmin"
+      if (user.category !== "systemadmin") {
+        return res
+          .status(403)
+          .json({ error: "Do not have enough Permission " });
       }
+      const balance = await getWalletBalance(user.walletAddress);
+
 
       // System Admin login is valid, generate JWT token for authentication
       const token = jwt.sign(
@@ -196,7 +168,8 @@ const authenticationController = {
           sub: user._id,
           email: user.email,
           walletAddress: user.walletAddress,
-          USER_TYPE: user.USER_TYPE,
+          category: user.category,
+          walletBalance:balance
         },
         process.env.SECRET_KEY,
         { expiresIn: "10h" }
@@ -210,6 +183,7 @@ const authenticationController = {
     }
   },
 
+  
   // Sign a transaction using the user's password and private key
   signTransaction: async (req, res) => {
     try {
@@ -245,9 +219,9 @@ const authenticationController = {
   },
 
   getUserWalletAndBalance: async (req, res) => {
+    console.log(req.user);
     try {
       const { email } = req.user; // Retrieve user's email from the authenticated JWT
-
       // Find the user by email
       const user = await User.findByEmail(email);
       if (!user) {
@@ -263,9 +237,101 @@ const authenticationController = {
       res.json({ walletAddress, balance });
     } catch (err) {
       console.error(err);
+      console.log(req.user);
+
       res.status(500).json({ error: "Failed to get user wallet and balance" });
     }
   },
+  // Alumni Profile Route
+  getProfile: async (req, res) => {
+    try {
+      const { email } = req.user; // Get the user's category from the JWT
+      console.log(email);
+
+      // Find the user by email
+      const user = await User.findByEmail(email);
+
+      res.json({
+        user,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to get alumni profile" });
+    }
+  },
+
+  // Alumni Logout
+  alumniLogout: async (req, res) => {
+    try {
+      // Assuming the client sends the token in the request headers
+      const bearerToken = req.headers.authorization;
+
+      if (!bearerToken || !bearerToken.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // Extract the JWT token (remove 'Bearer ' from the token string)
+      const token = bearerToken.split(" ")[1];
+
+      // Invalidate the token by setting its expiry time to an earlier time (e.g., 1 second ago)
+      // You can also add it to a list of invalidated tokens if needed
+
+      // Respond with a logout message
+      res.json({ message: "University logout successful" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "University logout failed" });
+    }
+  },
+
+  // University Logout
+  universityLogout: async (req, res) => {
+    try {
+      // Assuming the client sends the token in the request headers
+      const bearerToken = req.headers.authorization;
+
+      if (!bearerToken || !bearerToken.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // Extract the JWT token (remove 'Bearer ' from the token string)
+      const token = bearerToken.split(" ")[1];
+
+      // Invalidate the token by setting its expiry time to an earlier time (e.g., 1 second ago)
+      // You can also add it to a list of invalidated tokens if needed
+
+      // Respond with a logout message
+      res.json({ message: "University logout successful" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "University logout failed" });
+    }
+  },
+
+  // SystemAdmin Logout
+  systemAdminLogout: async (req, res) => {
+    try {
+      // Assuming the client sends the token in the request headers
+      const bearerToken = req.headers.authorization;
+
+      if (!bearerToken || !bearerToken.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // Extract the JWT token (remove 'Bearer ' from the token string)
+      const token = bearerToken.split(" ")[1];
+
+      // Invalidate the token by setting its expiry time to an earlier time (e.g., 1 second ago)
+      // You can also add it to a list of invalidated tokens if needed
+
+      // Respond with a logout message
+      res.json({ message: "University logout successful" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "University logout failed" });
+    }
+  },
+
 };
 
 module.exports = authenticationController;

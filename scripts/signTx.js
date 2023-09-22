@@ -3,7 +3,6 @@ const { ethers } = require('ethers');
 async function signTransactionScript( encodedABIData, nonce, signerPrivateKey, web3) {
   // Use ethers.utils.defaultAbiCoder.encode to get the consistent encoding format
 
-console.log(encodedABIData)
   const localMsgBeforeSigning = ethers.utils.keccak256(encodedABIData);
   const signature = web3.eth.accounts.sign(
     localMsgBeforeSigning,
